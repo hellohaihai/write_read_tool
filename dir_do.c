@@ -41,7 +41,7 @@ struct option {
 
 void *my_log(void *data)
 {
-	int preIndex[100]= {0},i = 0, flag[100] = {0};
+	int preIndex[100]= {0},i = 0, flag[100] = {0} ,count = 1;
 	FILE *fp = NULL;
 	time_t tBegin = time(0), tEnd = time(0);
 	char tmpBuf[30];
@@ -98,8 +98,9 @@ void *my_log(void *data)
 			fclose(fp);
 			tBegin = tEnd;
 			file_num_all = 0;
+			count = 0;
 		}
-		if ((tEnd - tBegin) >= 5)
+		if (((tEnd - tBegin) >= 5)&&(count == 0))
 		{
 			if((flag[0] == nIndex[0]) && (flag[thread_num-1] == nIndex[thread_num-1]))
 				break;
