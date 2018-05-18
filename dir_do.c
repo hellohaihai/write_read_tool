@@ -9,16 +9,28 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+
+/**
+ *  funtion: write,read,mkdir for cluster test
+ *  jiehongui@estor.com.cn
+ *  2018-05-18
+ *  
+ *
+ * */
+
+
 #define DIRNAME "/cluster2/test"
 #define THREAD_NUM 20
-#define WRITE 1
 #define READ 0
+#define WRITE 1
+#define MKDIR 2
 
 int opendirs(const char *,int,int);
 int mkdirs(const char *);
 int nIndex[100] ={ 0 };
 char *mountDir[] = {"/cluster/test","/dir1","/dir2","/dir3","/dir4","/dir5","/dir6","/dir7"};
 int thread_num = 0;
+int type = 0;
 
 struct option {
     int index;
@@ -37,6 +49,19 @@ void *my_log(void *data)
 	char resu[512];
 	char result[2048];
 	int file_num_one = 0,file_num_all = 0;
+	char file_name[256];
+
+	tEnd = time(0);
+	memset(tmpBuf,0,sizeof(tmpBuf));
+	memset(file_name,0,sizeof(file_name));
+	strftime(tmpBuf, sizeof(tmpBuf), "%Y-%m-%d_%H-%M-%S", localtime(&tEnd));
+	if(type == READ){
+	    sprintf(file_name,"%s_%s",tmpBuf,"read");
+	}else if(type == WRITE){
+	    sprintf(file_name,"%s_%s",tmpBuf,"write");
+	}else if(type == MKDIR){
+	    sprintf(file_name,"%s_%s",tmpBuf,"mkdir");
+	}
 
 	while(1)
 	{
@@ -62,9 +87,9 @@ void *my_log(void *data)
 				memset(resu,0,sizeof(resu));
 				file_num_one = 0 ;
 			}
-			sprintf(resu,"ten min %d thread read all:%d\n\n",THREAD_NUM,file_num_all);
+			sprintf(resu,"ten min %d thread read all:%d\n\n",thread_num,file_num_all);
 			strcat(result,resu);
-			fp = fopen("haihai_log_client_read","a+");
+			fp = fopen(file_name,"a+");
 			if (NULL == fp){
 				printf("openfail:%s\n",strerror(errno));
 				continue;
@@ -152,7 +177,7 @@ void *my_mkdir(void *data){
 }
 int main(int argc,char **argv)
 {
-	int ret = 0,i = 0, flag = 0;
+	int ret = 0,i = 0;
 	void *result;
 	pthread_t log_thread ;//记录线程
 	pthread_t read_thread[100];//运行线程
@@ -160,34 +185,58 @@ int main(int argc,char **argv)
 	void* (*function)(void *);
 
 
-	//检查参数同时判断操作类型，读还是写
-	if(argc <= 1){
-	    fprintf(stderr,"please check args :%s\n\t%s\n\t%s\n\t%s\n",
-		    argv[0],"线程数","文件大小","文件数量");
+	//检查参数同时判断操作类型，read|write|mkdir
+	if(argc <= 2){
+	    fprintf(stderr,"please check args :%s\n\t%s\n\t%s\n\t%s\n\t%s\n\t%s\n",
+		    argv[0],"测试类型(read|write|mkdir)","线程数","路径","文件大小","文件数量");
 	    return -1;
-	}else if(argc == 2){
-	    flag = READ;//读文件
+	}else if(!strcmp(argv[1],"read")){
+	    type = READ;//读文件
+	}else if(!strcmp(argv[1],"write")){
+	    type = WRITE;//写文件
+	}else if(!strcmp(argv[1],"mkdir")){
+	    type = MKDIR;//创建文件夹
 	}else{
-	    flag = WRITE;//写文件
+	    fprintf(stderr,"please check args,no option :%s\n",argv[1]);
+	    return -1;
 	}
 
-	thread_num = atoi(argv[1]);
+	thread_num = atoi(argv[2]);
 	
 	for(i = 0 ; i < thread_num ; i++){
 	    thread_option[i].index = i;
-	    if(flag){
+	    if(type == WRITE){
 		//若为写文件则初始化文件大小和数量
-		thread_option[i].file_size = atoi(argv[2]);
-		thread_option[i].file_num = atoi(argv[3]);
+		if(argc < 6){
+		    fprintf(stderr,"please check args the option write need 线程数 路径 文件大小 文件数量\n");
+		    return -1;
+		}
+		thread_option[i].file_size = atoi(argv[4]);
+		thread_option[i].file_num = atoi(argv[5]);
 		function = my_write;
-	    }else{
+	    }else if(type == READ){
+		if(argc < 4 ){
+		    fprintf(stderr,"please check args the option read need 线程数 路径\n");
+		    return -1;
+		}
 		//若为读文件则初始化文件大小和数量为0
 		thread_option[i].file_size = 0;
 		thread_option[i].file_num = 0;
 		function = my_read;
+	    }else if(type == MKDIR){
+		if (argc < 4){
+		    fprintf(stderr,"please check args the option mkdir need 线程数 路径\n");
+		    return -1;
+		}
+		thread_option[i].file_size = 0;
+		thread_option[i].file_num = 0;
+		function = my_mkdir;
+	    }else{
+		fprintf(stderr,"please check args,no option :%s\n",argv[1]);
+		return -1;
 	    }
 	    memset(thread_option[i].dirname,0,sizeof(thread_option[i].dirname));
-	    strcpy(thread_option[i].dirname,DIRNAME);
+	    strcpy(thread_option[i].dirname,argv[3]);
 	}
 
 	for(i = 0 ; i < thread_num ; i++)
