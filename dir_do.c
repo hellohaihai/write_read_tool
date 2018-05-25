@@ -9,16 +9,29 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+
+/**
+ *  funtion: write,read,mkdir for cluster test
+ *  jiehongui@estor.com.cn
+ *  2018-05-18
+ *  
+ *
+ * */
+
+
 #define DIRNAME "/cluster2/test"
 #define THREAD_NUM 20
-#define WRITE 1
 #define READ 0
+#define WRITE 1
+#define MKDIR 2
+#define RENAME 3
 
 int opendirs(const char *,int,int);
 int mkdirs(const char *);
 int nIndex[100] ={ 0 };
 char *mountDir[] = {"/cluster/test","/dir1","/dir2","/dir3","/dir4","/dir5","/dir6","/dir7"};
 int thread_num = 0;
+int type = 0;
 
 struct option {
     int index;
@@ -29,24 +42,37 @@ struct option {
 
 void *my_log(void *data)
 {
-	int preIndex[100]= {0},i = 0, flag[100] = {0};
+	int preIndex[100]= {0},i = 0, flag[100] = {0} , count=1;
 	FILE *fp = NULL;
-	time_t tBegin = time(0), tEnd = time(0);
+	time_t tBegin = time(0), tEnd = time(0),tfile = time(0);
 	char tmpBuf[30];
 	time_t t;
 	char resu[512];
 	char result[2048];
 	int file_num_one = 0,file_num_all = 0;
+	char file_name[256];
 
+	tfile = time(0);
+	memset(tmpBuf,0,sizeof(tmpBuf));
+	memset(file_name,0,sizeof(file_name));
+	strftime(tmpBuf, sizeof(tmpBuf), "%Y-%m-%d_%H-%M-%S", localtime(&tfile));
+	if(type == READ){
+	    sprintf(file_name,"%s_%s",tmpBuf,"read");
+	}else if(type == WRITE){
+	    sprintf(file_name,"%s_%s",tmpBuf,"write");
+	}else if(type == MKDIR){
+	    sprintf(file_name,"%s_%s",tmpBuf,"mkdir");
+	}else if(type == RENAME){
+	    sprintf(file_name,"%s_%s",tmpBuf,"rename");
+	}
+	printf("file name is %s\n",file_name);
+	system("nmon -f  -s 10 -c 6000");
 	while(1)
 	{
 		t = time(NULL);
 		tEnd = time(0);
 		if ((tEnd - tBegin) >= 600)
 		{
-			for(i = 0 ; i < thread_num ; i++){
-				printf("nIndex[%d]=%d,preIndex[%d]=%d\n",i,nIndex[i],i,preIndex[i]);
-			}
 			memset(tmpBuf,0,sizeof(tmpBuf));
 			memset(resu,0,sizeof(resu));
 			memset(result,0,sizeof(result));
@@ -62,9 +88,9 @@ void *my_log(void *data)
 				memset(resu,0,sizeof(resu));
 				file_num_one = 0 ;
 			}
-			sprintf(resu,"ten min %d thread read all:%d\n\n",THREAD_NUM,file_num_all);
+			sprintf(resu,"ten min %d thread read all:%d\n\n",thread_num,file_num_all);
 			strcat(result,resu);
-			fp = fopen("haihai_log_client_read","a+");
+			fp = fopen(file_name,"a+");
 			if (NULL == fp){
 				printf("openfail:%s\n",strerror(errno));
 				continue;
@@ -73,8 +99,10 @@ void *my_log(void *data)
 			fclose(fp);
 			tBegin = tEnd;
 			file_num_all = 0;
+			count = 0 ;
 		}
-		if ((tEnd - tBegin) >= 5)
+		/*
+		if (((tEnd - tBegin) >= 5)&&(count == 0))
 		{
 			if((flag[0] == nIndex[0]) && (flag[thread_num-1] == nIndex[thread_num-1]))
 				break;
@@ -83,6 +111,7 @@ void *my_log(void *data)
 				flag[i] = nIndex[i];
 			}
 		}
+		*/
 	}
 	
 }
@@ -100,6 +129,46 @@ reload:
 	}
 	goto reload;
 	
+}
+void *my_rename(void *data){
+    struct option *option = data;
+    int ret = 0;
+    int index = option->index;
+    unsigned long  threadID = pthread_self();
+    time_t t;
+    struct tm* pTime;
+    char tmpBuf[30];
+    char dirPath[256] = {0};
+    char dirName[256] = { 0 };
+    char dirReName[256] = {0};
+    DIR *dir;
+    
+    
+    while(nIndex[index] <= (option->file_num)){
+	t = time(NULL);
+	pTime = gmtime(&t);
+
+	memset(dirPath,0,sizeof(dirPath));
+	memset(dirName,0,sizeof(dirName));
+	memset(dirReName,0,sizeof(dirReName));
+
+	sprintf(dirPath, "%s/%lld/%04d/%02d/%02d/%02d",
+	        option->dirname, threadID, pTime->tm_year + 1900, pTime->tm_mon + 1, pTime->tm_mday, pTime->tm_hour);
+	sprintf(dirName, "%s/%d", dirPath, nIndex[index]);
+	sprintf(dirReName,"%s_a",dirName);
+
+	mkdirs(dirName);
+	ret = rename(dirName,dirReName);
+	if(ret == 0){
+	    printf("%s rename sucessful !!\n",dirName);
+	    nIndex[index] ++;
+	}else{
+	    printf("%s rename fail !!\n",dirName);
+	}
+
+    }
+
+
 }
 void *my_write(void *data){
 	int ret = 0,i;
@@ -152,7 +221,7 @@ void *my_mkdir(void *data){
 }
 int main(int argc,char **argv)
 {
-	int ret = 0,i = 0, flag = 0;
+	int ret = 0,i = 0;
 	void *result;
 	pthread_t log_thread ;//记录线程
 	pthread_t read_thread[100];//运行线程
@@ -160,34 +229,68 @@ int main(int argc,char **argv)
 	void* (*function)(void *);
 
 
-	//检查参数同时判断操作类型，读还是写
-	if(argc <= 1){
-	    fprintf(stderr,"please check args :%s\n\t%s\n\t%s\n\t%s\n",
-		    argv[0],"线程数","文件大小","文件数量");
+	//检查参数同时判断操作类型，read|write|mkdir
+	if(argc <= 2){
+	    fprintf(stderr,"please check args :%s\n\t%s\n\t%s\n\t%s\n\t%s\n\t%s\n",
+		    argv[0],"测试类型(read|write|mkdir|rename)","线程数","操作路径","(文件|目录)数量","文件大小");
 	    return -1;
-	}else if(argc == 2){
-	    flag = READ;//读文件
+	}else if(!strcmp(argv[1],"read")){
+	    type = READ;//读文件
+	}else if(!strcmp(argv[1],"write")){
+	    type = WRITE;//写文件
+	}else if(!strcmp(argv[1],"mkdir")){
+	    type = MKDIR;//创建文件夹
+	}else if(!strcmp(argv[1],"rename")){
+	    type = RENAME;//重命名文件夹
 	}else{
-	    flag = WRITE;//写文件
+	    fprintf(stderr,"please check args,no option :%s\n",argv[1]);
+	    return -1;
 	}
 
-	thread_num = atoi(argv[1]);
+	thread_num = atoi(argv[2]);
 	
 	for(i = 0 ; i < thread_num ; i++){
 	    thread_option[i].index = i;
-	    if(flag){
+	    if(type == WRITE){
 		//若为写文件则初始化文件大小和数量
-		thread_option[i].file_size = atoi(argv[2]);
-		thread_option[i].file_num = atoi(argv[3]);
+		if(argc < 6){
+		    fprintf(stderr,"please check args the option write need 线程数 路径 文件大小 文件数量\n");
+		    return -1;
+		}
+		thread_option[i].file_num = atoi(argv[4]);
+		thread_option[i].file_size = atoi(argv[5]);
 		function = my_write;
-	    }else{
+	    }else if(type == READ){
+		if(argc < 4 ){
+		    fprintf(stderr,"please check args the option read need 线程数 操作路径路径\n");
+		    return -1;
+		}
 		//若为读文件则初始化文件大小和数量为0
 		thread_option[i].file_size = 0;
 		thread_option[i].file_num = 0;
 		function = my_read;
+	    }else if(type == MKDIR){
+		if (argc < 4){
+		    fprintf(stderr,"please check args the option mkdir need 线程数 操作路径\n");
+		    return -1;
+		}
+		thread_option[i].file_size = 0;
+		thread_option[i].file_num = 0;
+		function = my_mkdir;
+	    }else if(type == RENAME){
+		if (argc < 5){
+		    fprintf(stderr,"please check args the option rename need 线程数 操作路径 文件夹数量\n");
+		    return -1;
+		}
+		thread_option[i].file_num = atoi(argv[4]);
+		thread_option[i].file_size = 0 ;
+		function = my_rename;
+	    }else{
+		fprintf(stderr,"please check args,no option :%s\n",argv[1]);
+		return -1;
 	    }
 	    memset(thread_option[i].dirname,0,sizeof(thread_option[i].dirname));
-	    strcpy(thread_option[i].dirname,DIRNAME);
+	    strcpy(thread_option[i].dirname,argv[3]);
 	}
 
 	for(i = 0 ; i < thread_num ; i++)
@@ -287,7 +390,7 @@ int mkdirs(const char *dir){
 
     dirFP = opendir(dir);
     if(NULL==dirFP){
-	printf("%s opendir fail.\n",dir);
+	//printf("%s opendir fail.\n",dir);
 	for(i=0;i<strlen(dir);i++){
 	    if(dir[i] == '/')
 		num++;
@@ -318,7 +421,7 @@ int mkdirs(const char *dir){
     }else{
 	closedir(dirFP);
 	dirFP = NULL;
-	printf("---open sucess ----%s \n",dir);
+	//printf("---open sucess ----%s \n",dir);
 	return 0;
     }
 }
